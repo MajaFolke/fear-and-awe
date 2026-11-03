@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Video Grid</title>
+<title>Fear and awe</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   #grid {
@@ -258,12 +258,31 @@
     // If there are more cells than videos, the same order repeats from the start.
     const order = RANDOM ? shuffle(videos) : videos;
 
+    // Create all cells up front (empty), then give them a source one at a time:
+    // the next video only starts loading once the previous one is ready to play.
+    const cells = [];
     for (let i = 0; i < COLUMNS * ROWS; i++) {
       const v = document.createElement('video');
-      v.src = order[i % order.length];
       v.autoplay = v.muted = v.loop = v.playsInline = true;
+      v.preload = 'auto';
       grid.appendChild(v);
+      cells.push(v);
     }
+
+    function loadNext(i) {
+      if (i >= cells.length) return;
+      const v = cells[i];
+      let done = false;
+      const next = () => {
+        if (done) return;
+        done = true;
+        loadNext(i + 1);
+      };
+      v.addEventListener('canplaythrough', next, { once: true });
+      v.addEventListener('error', next, { once: true });
+      v.src = order[i % order.length];
+    }
+    loadNext(0);
   });
 </script>
 </body>
