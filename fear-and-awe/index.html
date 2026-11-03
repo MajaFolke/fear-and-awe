@@ -1,0 +1,270 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Video Grid</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #grid {
+    display: grid;
+    /* columns/rows are set from COLUMNS and ROWS in the script below */
+    width: 100vw;
+    height: 100vh;
+  }
+  video { width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: cover; display: block; }
+
+  /* Settings panel — press S to open/close. Styled like a classic black-and-white Mac window. */
+  #settings {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: #fff; color: #000; font-family: ChicagoFLF, Chicago, Charcoal, Geneva, sans-serif; font-size: 12px;
+    min-width: 260px; z-index: 10;
+    border: 1px solid #000;
+    box-shadow: 2px 2px 0 #000; /* hard drop shadow */
+  }
+  #settings[hidden] { display: none; }
+  /* Title bar: horizontal pinstripes, centered title, close box on the right */
+  #settings .titlebar {
+    position: relative; display: flex; justify-content: center; align-items: center;
+    height: 19px; border-bottom: 1px solid #000; user-select: none;
+    background:
+      repeating-linear-gradient(to bottom, #fff 0 1px, #000 1px 2px) center / calc(100% - 4px) 11px no-repeat,
+      #fff;
+  }
+  #settings .titlebar span { background: #fff; padding: 0 6px; font-weight: bold; position: relative; }
+  #settings .close {
+    position: absolute; right: 8px; top: 3px;
+    width: 13px; height: 13px; padding: 0; cursor: pointer;
+    border: 1px solid #000; box-shadow: 0 0 0 1px #fff; /* white gap so it stands out from the stripes */
+    /* X drawn inside the box */
+    background:
+      linear-gradient(45deg, transparent 42%, #000 42% 58%, transparent 58%),
+      linear-gradient(-45deg, transparent 42%, #000 42% 58%, transparent 58%),
+      #fff;
+  }
+  #settings .close:active {
+    background:
+      linear-gradient(45deg, transparent 42%, #fff 42% 58%, transparent 58%),
+      linear-gradient(-45deg, transparent 42%, #fff 42% 58%, transparent 58%),
+      #000;
+  }
+  #settings .body { padding: 14px 14px 12px; }
+  #settings .interval { display: flex; align-items: center; gap: 4px; }
+  #settings .interval input[type=number] { width: 40px; }
+  #settings label { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+  #settings input[type=number] {
+    width: 60px; font-family: inherit; font-size: 12px; background: #fff; color: #000;
+    padding: 2px 3px; border: 1px solid #000; border-radius: 0; outline: none;
+  }
+  #settings input[type=number]:focus { box-shadow: 0 0 0 1px #000; }
+  /* Square checkbox with an X when checked */
+  #settings input[type=checkbox] {
+    appearance: none; -webkit-appearance: none; margin: 0;
+    width: 12px; height: 12px; border: 1px solid #000; background: #fff; cursor: pointer;
+  }
+  #settings input[type=checkbox]:checked {
+    background:
+      linear-gradient(45deg, transparent 44%, #000 44% 56%, transparent 56%),
+      linear-gradient(-45deg, transparent 44%, #000 44% 56%, transparent 56%),
+      #fff;
+  }
+  /* Rounded button; the thick outer ring marks it as the default (Enter) button */
+  #settings .buttons button {
+    min-width: 64px; padding: 3px 12px; margin: 4px;
+    background: #fff; color: #000; font-family: inherit; font-size: 12px; cursor: pointer;
+    border: 1px solid #000; border-radius: 6px;
+    box-shadow: 0 0 0 2px #fff, 0 0 0 5px #000;
+  }
+  #settings .buttons button:active { background: #000; color: #fff; }
+  #settings .buttons { display: flex; justify-content: flex-end; margin-top: 14px; }
+  #settings .hint { margin-top: 10px; font-size: 10px; font-family: Geneva, sans-serif; }
+</style>
+</head>
+<body>
+<div id="grid"></div>
+<form id="settings" hidden>
+  <div class="titlebar">
+    <button type="button" class="close" id="settings-close" aria-label="Close"></button>
+    <span>Settings</span>
+  </div>
+  <div class="body">
+    <label>Columns <input type="number" name="columns" min="1" max="50" required></label>
+    <label>Rows <input type="number" name="rows" min="1" max="50" required></label>
+    <label>Random order <input type="checkbox" name="random"></label>
+    <label>Auto reload <input type="checkbox" name="autoReload"></label>
+    <label>Reload every
+      <span class="interval">
+        <input type="number" name="reloadMinutes" min="0" step="1" required> min
+        <input type="number" name="reloadSeconds" min="0" max="59" step="1" required> sec
+      </span>
+    </label>
+    <div class="buttons">
+      <button type="submit">Save</button>
+    </div>
+  </div>
+</form>
+<script>
+  // ===== Defaults =====
+  // These are used unless changed in the settings panel (press S).
+  // Saved settings are stored in this browser and override the values below.
+
+  // ===== Grid size — change these to resize the grid =====
+  // Number of videos side by side (left to right)
+  let COLUMNS = 6;
+  // Number of videos stacked (top to bottom)
+  let ROWS = 6;
+  // Total cells = COLUMNS * ROWS. If there are fewer videos than cells,
+  // the remaining cells repeat the videos in the same order from the start.
+
+  // ===== Video files =====
+  // Videos must be named 1.mp4, 2.mp4, 3.mp4 ... inside the videos/ folder.
+  // The page loads them in number order and stops at the first missing number.
+  const FOLDER = 'videos/';
+  const EXTENSION = '.mp4';
+
+  // ===== Order =====
+  // false = number order (1, 2, 3 ... then 1, 2, 3 ... again)
+  // true  = shuffled order on each page load; no video repeats until all have been shown,
+  //         then the same shuffled order repeats
+  let RANDOM = true;
+
+  // ===== Auto reload =====
+  // true = reload the grid every RELOAD_SECONDS (with RANDOM on, each reload is a new shuffle)
+  let AUTO_RELOAD = false;
+  // Interval in seconds (shown as minutes + seconds in the settings panel)
+  let RELOAD_SECONDS = 60;
+
+  // ===== Settings panel =====
+  const SETTINGS_KEY = 'videoGridSettings';
+  const settingsForm = document.getElementById('settings');
+
+  // Apply saved settings (if any) over the defaults above
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+    if (saved) ({ COLUMNS, ROWS, RANDOM, AUTO_RELOAD, RELOAD_SECONDS } = { COLUMNS, ROWS, RANDOM, AUTO_RELOAD, RELOAD_SECONDS, ...saved });
+  } catch (e) {}
+
+  function openSettings() {
+    const f = settingsForm.elements;
+    f.columns.value = COLUMNS;
+    f.rows.value = ROWS;
+    f.random.checked = RANDOM;
+    f.autoReload.checked = AUTO_RELOAD;
+    f.reloadMinutes.value = Math.floor(RELOAD_SECONDS / 60);
+    f.reloadSeconds.value = RELOAD_SECONDS % 60;
+    settingsForm.hidden = false;
+    f.columns.focus();
+  }
+
+  function closeSettings() {
+    settingsForm.hidden = true;
+  }
+
+  settingsForm.addEventListener('submit', e => {
+    e.preventDefault();
+    const f = settingsForm.elements;
+    const settings = {
+      COLUMNS: parseInt(f.columns.value, 10),
+      ROWS: parseInt(f.rows.value, 10),
+      RANDOM: f.random.checked,
+      AUTO_RELOAD: f.autoReload.checked,
+      // At least 1 second, so 0 min 0 sec can't reload the page nonstop
+      RELOAD_SECONDS: Math.max(1, parseInt(f.reloadMinutes.value, 10) * 60 + parseInt(f.reloadSeconds.value, 10)),
+    };
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
+    location.reload();
+  });
+
+  document.getElementById('settings-close').addEventListener('click', closeSettings);
+
+  // Reloads the page on the set interval. Skips a reload while the settings panel
+  // is open, so it doesn't wipe out changes you're making.
+  if (AUTO_RELOAD && RELOAD_SECONDS > 0) {
+    setInterval(() => {
+      if (settingsForm.hidden) location.reload();
+    }, RELOAD_SECONDS * 1000);
+  }
+
+  document.addEventListener('keydown', e => {
+    // Don't toggle while typing in a settings field
+    if (e.target.matches('input')) {
+      if (e.key === 'Escape') closeSettings();
+      return;
+    }
+    if (e.key === 's' || e.key === 'S') settingsForm.hidden ? openSettings() : closeSettings();
+    if (e.key === 'Escape') closeSettings();
+  });
+
+  // Resolves true if the video file exists and can be loaded, false otherwise
+  function videoExists(src) {
+    return new Promise(resolve => {
+      const probe = document.createElement('video');
+      probe.preload = 'metadata';
+      probe.onloadedmetadata = () => resolve(true);
+      probe.onerror = () => resolve(false);
+      probe.src = src;
+    });
+  }
+
+  // Finds 1.mp4, 2.mp4, ... until one is missing.
+  // In number order, it stops once every cell has a video; when RANDOM, it finds them all.
+  async function findVideos() {
+    const found = [];
+    for (let n = 1; RANDOM || n <= COLUMNS * ROWS; n++) {
+      const src = FOLDER + n + EXTENSION;
+      if (!(await videoExists(src))) break;
+      found.push(src);
+    }
+    return found;
+  }
+
+  findVideos().then(videos => {
+    const grid = document.getElementById('grid');
+    if (!videos.length) {
+      grid.outerHTML = `<p style="color:#fff;font-family:sans-serif;padding:16px">No videos found. Name them ${FOLDER}1${EXTENSION}, ${FOLDER}2${EXTENSION}, ...</p>`;
+      return;
+    }
+    // Sizes every cell to the exact same whole number of physical screen pixels,
+    // so all videos are identical and no thin seams appear between them.
+    // Leftover pixels (when the screen doesn't divide evenly) become a thin black
+    // border split evenly around the edges of the grid.
+    function layout() {
+      const dpr = window.devicePixelRatio || 1;
+      const screenW = Math.round(window.innerWidth * dpr);
+      const screenH = Math.round(window.innerHeight * dpr);
+      const colPx = Math.floor(screenW / COLUMNS);
+      const rowPx = Math.floor(screenH / ROWS);
+      const offsetX = Math.floor((screenW - colPx * COLUMNS) / 2);
+      const offsetY = Math.floor((screenH - rowPx * ROWS) / 2);
+      grid.style.gridTemplateColumns = `repeat(${COLUMNS}, ${colPx / dpr}px)`;
+      grid.style.gridTemplateRows = `repeat(${ROWS}, ${rowPx / dpr}px)`;
+      grid.style.width = `${colPx * COLUMNS / dpr}px`;
+      grid.style.height = `${rowPx * ROWS / dpr}px`;
+      grid.style.transform = `translate(${offsetX / dpr}px, ${offsetY / dpr}px)`;
+    }
+    layout();
+    window.addEventListener('resize', layout);
+
+    // Returns a shuffled copy of the list (Fisher–Yates)
+    function shuffle(list) {
+      const a = list.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    // RANDOM: shuffled once per page load. Otherwise: number order.
+    // If there are more cells than videos, the same order repeats from the start.
+    const order = RANDOM ? shuffle(videos) : videos;
+
+    for (let i = 0; i < COLUMNS * ROWS; i++) {
+      const v = document.createElement('video');
+      v.src = order[i % order.length];
+      v.autoplay = v.muted = v.loop = v.playsInline = true;
+      grid.appendChild(v);
+    }
+  });
+</script>
+</body>
+</html>
